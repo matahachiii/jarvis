@@ -1,0 +1,37 @@
+# =============================================================
+# Jarvis configuration
+# Change settings here, never in the code.
+# =============================================================
+
+[jarvis]
+name = "Jarvis"
+user_name = "Anwar"
+
+[brain]
+# Which brain to use:
+#   "ollama"            -> local model via Ollama (free, private, offline)
+#   "openai_compatible" -> free-tier cloud API (faster/smarter, needs internet + API key)
+provider = "ollama"
+
+# Thinking mode: the model reasons step by step before answering.
+# More accurate on multi-step questions, but adds seconds of delay.
+think = false
+
+# Creativity of the answers (0 = deterministic, 1 = creative)
+temperature = 0.6
+
+# Context window in tokens. Smaller = less RAM, but shorter memory per conversation.
+context_length = 4096
+
+[brain.ollama]
+model = "qwen3:4b"
+host = "http://localhost:11434"
+# How long the model stays loaded in RAM after the last request
+keep_alive = "10m"
+
+[brain.cloud]
+# Any OpenAI-compatible API (Groq, Gemini, OpenRouter, ...). Filled in later.
+base_url = ""
+model = ""
+# Name of the environment variable in .env that holds the API key
+api_key_env = "JARVIS_CLOUD_API_KEY"
