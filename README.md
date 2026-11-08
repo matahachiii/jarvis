@@ -18,7 +18,7 @@ The end goal: Jarvis as an **orchestrator** of a "village" of specialist agents
 
 | Phase | Goal | Status |
 |---|---|---|
-| 0 | Foundation: environment, structure, local LLM, test script | In progress |
+| 0 | Foundation: environment, structure, local LLM, test script | done |
 | 1 | Text Jarvis: terminal chat loop with memory and personality | |
 | 2 | Tools: open apps, search files, Spotify, ... + confirmation + logging | |
 | 3 | Voice: speech-to-text + text-to-speech (push-to-talk) | |
