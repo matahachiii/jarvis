@@ -6,6 +6,7 @@
 [jarvis]
 name = "Jarvis"
 user_name = "Anwar"
+personality_file = "config/personality.md"
 
 [brain]
 # Which brain to use:
