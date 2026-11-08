@@ -24,7 +24,7 @@ temperature = 0.6
 context_length = 4096
 
 [brain.ollama]
-model = "qwen3:4b"
+model = "qwen3:4b-instruct-2507-q4_K_M"
 host = "http://localhost:11434"
 # How long the model stays loaded in RAM after the last request
 keep_alive = "10m"
