@@ -75,3 +75,8 @@ class Conversation:
         if prompt_tokens:
             sent_estimate = self.system["tokens"] + sum(m["tokens"] for m in self.history[:-1])
             self.system["tokens"] = max(1, self.system["tokens"] + prompt_tokens - sent_estimate)
+
+    def undo_last_user(self) -> None:
+        """Remove the last user message, e.g. when its answer failed or was interrupted."""
+        if self.history and self.history[-1]["role"] == "user":
+            self.history.pop()

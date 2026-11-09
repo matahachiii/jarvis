@@ -33,3 +33,41 @@ def clean_for_speech(text: str) -> str:
     text = _EXTRA_SPACES.sub(" ", text)
     text = _SPACE_BEFORE_NEWLINE.sub("\n", text)
     return text
+
+
+class StreamCleaner:
+    """
+    Cleans streamed text chunk by chunk.
+
+    Holds back the last unfinished word until a space or newline arrives, so markdown
+    split over two chunks ("**Cert" + "ainly**") is still caught. Remembers whether the
+    previous piece ended a line, so "- " is only removed when it really is a list bullet.
+    """
+
+    def __init__(self):
+        self._buffer = ""
+        self._at_line_start = True
+
+    def feed(self, chunk: str) -> str:
+        """Add a chunk; return the part that is ready to show (complete words only)."""
+        self._buffer += chunk
+        cut = max(self._buffer.rfind(" "), self._buffer.rfind("\n"))
+        if cut < 0:
+            return ""  # no complete word yet, keep waiting
+        ready, self._buffer = self._buffer[:cut + 1], self._buffer[cut + 1:]
+        return self._clean(ready)
+
+    def flush(self) -> str:
+        """Return whatever is left at the end of the stream."""
+        ready, self._buffer = self._buffer, ""
+        return self._clean(ready)
+
+    def _clean(self, text: str) -> str:
+        if not text:
+            return ""
+        # A fake previous character tells the regexes whether we are at the start of a line:
+        # "\n" -> yes (bullets/headings can be stripped), "x" -> no (mid-sentence, leave "-" alone)
+        prefix = "\n" if self._at_line_start else "x"
+        cleaned = clean_for_speech(prefix + text)[1:]
+        self._at_line_start = text.rstrip(" \t").endswith("\n")
+        return cleaned

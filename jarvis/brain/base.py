@@ -51,3 +51,6 @@ class Brain(ABC):
         for _ in self.chat_stream(messages, tools):
             pass  # consume the whole stream; we only want the final result
         return self.last_response
+
+    def warm_up(self, messages: list[dict]) -> None:
+        """Optional: prepare the model (e.g. load it into RAM) so the first real answer is fast."""
