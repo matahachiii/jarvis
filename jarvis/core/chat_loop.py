@@ -3,6 +3,7 @@ Text Jarvis: a terminal chat loop.
 
 Type a message and Jarvis streams his answer back, word by word.
 Commands start with "/" (type /help). Ctrl+C stops an answer; at the prompt it quits.
+Every session is saved as a JSONL transcript in logs/.
 """
 
 import readline  # noqa: F401  (importing it is enough: input() gets arrow-key history and line editing)
@@ -11,6 +12,7 @@ from jarvis.brain import create_brain
 from jarvis.core.config import load_config
 from jarvis.core.conversation import Conversation
 from jarvis.core.personality import load_system_prompt
+from jarvis.core.session_log import SessionLog
 from jarvis.core.text_cleaner import StreamCleaner, clean_for_speech
 
 HELP = """  Commands:
@@ -42,8 +44,8 @@ def print_stats(brain, conversation: Conversation) -> None:
           f"{conversation.budget} tokens, trimmed turns: {conversation.dropped_turns}")
 
 
-def answer(brain, conversation: Conversation, name: str) -> None:
-    """Stream one answer to the terminal and store it in the conversation."""
+def answer(brain, conversation: Conversation, name: str, log: SessionLog) -> None:
+    """Stream one answer to the terminal, store it in the conversation and log it."""
     cleaner = StreamCleaner()
     print(f"{name}: ", end="", flush=True)
     try:
@@ -53,21 +55,29 @@ def answer(brain, conversation: Conversation, name: str) -> None:
     except KeyboardInterrupt:
         print(" [interrupted]")
         conversation.undo_last_user()  # forget the question, so history stays in user/assistant pairs
+        log.log("event", "answer interrupted")
         return
     except ConnectionError:
         print(f"\n  Lost the connection to the brain. {OLLAMA_HINT}")
         conversation.undo_last_user()
+        log.log("event", "brain connection lost")
         return
     except Exception as error:
         print(f"\n  Brain error: {error}")
         conversation.undo_last_user()
+        log.log("event", f"brain error: {error}")
         return
 
     reply = brain.last_response
     if reply.stats.get("done_reason") == "length":
         print("  [cut off: the answer reached max_tokens]")
     # Store the cleaned text, so the model sees its own earlier replies without markdown/emojis
-    conversation.add_assistant(clean_for_speech(reply.text).strip(), reply.stats)
+    clean = clean_for_speech(reply.text).strip()
+    extra = {"stats": reply.stats}
+    if clean != reply.text:
+        extra["raw"] = reply.text  # keep the original when the safety net had to step in
+    log.log("assistant", clean, **extra)
+    conversation.add_assistant(clean, reply.stats)
 
 
 def main() -> None:
@@ -93,7 +103,10 @@ def main() -> None:
     except Exception as error:
         print(f"Brain error during start-up: {error}")
         return
-    print(f"{name} is ready. Type /help for commands.\n")
+
+    log = SessionLog()
+    log.log("system", conversation.messages[0]["content"], brain=brain.name)
+    print(f"{name} is ready. Type /help for commands.  (log: logs/{log.path.name})\n")
 
     while True:
         try:
@@ -112,6 +125,7 @@ def main() -> None:
                 print(HELP)
             elif command == "/reset":
                 conversation.reset()
+                log.log("event", "reset")
                 print("  Conversation cleared.")
             elif command == "/stats":
                 print_stats(brain, conversation)
@@ -120,7 +134,9 @@ def main() -> None:
             continue
 
         conversation.add_user(user_text)
-        answer(brain, conversation, name)
+        log.log("user", user_text)
+        answer(brain, conversation, name, log)
         print()  # blank line between turns
 
+    log.log("event", "session end")
     print(f"{name}: Goodbye, sir.")
