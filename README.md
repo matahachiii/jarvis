@@ -19,7 +19,7 @@ The end goal: Jarvis as an **orchestrator** of a "village" of specialist agents
 | Phase | Goal | Status |
 |---|---|---|
 | 0 | Foundation: environment, structure, local LLM, test script | done |
-| 1 | Text Jarvis: terminal chat loop with memory and personality | |
+| 1 | Text Jarvis: terminal chat loop with memory and personality | done |
 | 2 | Tools: open apps, search files, Spotify, ... + confirmation + logging | |
 | 3 | Voice: speech-to-text + text-to-speech (push-to-talk) | |
 | 4 | Always on: wake word "Hey Jarvis" + streaming | |
@@ -31,15 +31,15 @@ The end goal: Jarvis as an **orchestrator** of a "village" of specialist agents
 
 ```
 jarvis/
-  core/      conversation loop, orchestrator
+  core/      chat loop, conversation memory, personality, session log
   brain/     LLM interface and providers (Ollama, cloud)
   tools/     actions on the Mac
   agents/    specialist agents (the village)
   voice/     speech-to-text, text-to-speech, wake word
   memory/    persistent memory
-config/      settings (config.toml)
+config/      settings (config.toml) and Jarvis' personality (personality.md)
 data/        local data (not in git)
-logs/        log files (not in git)
+logs/        session transcripts (not in git)
 ```
 
 ## Setup
@@ -51,6 +51,43 @@ cd ~/Desktop/Jarvis
 conda deactivate            # only if Anaconda is installed
 source .venv/bin/activate
 pip install -r requirements.txt
-ollama pull qwen3:4b
-python test_brain.py
+brew services start ollama
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ```
+
+## Usage
+
+Start Text Jarvis:
+
+```bash
+python -m jarvis
+```
+
+Type a message and Jarvis streams his answer back, word by word. He remembers the
+conversation within a session (older turns are trimmed automatically to fit the context window).
+
+| Command | What it does |
+|---|---|
+| `/help` | show the commands |
+| `/reset` | forget the conversation (the personality stays) |
+| `/stats` | timing and tokens of the last answer, current history size |
+| `/exit`, `/quit` | quit (also Ctrl+D, or Ctrl+C at the prompt) |
+
+Ctrl+C while Jarvis is answering stops the answer. Every session is saved as a JSONL
+transcript in `logs/` (readable in R with `jsonlite::stream_in(file("logs/<session>.jsonl"))`).
+
+The personality lives in `config/personality.md`; all other settings in `config/config.toml`.
+
+## Tests
+
+```bash
+python test_brain.py          # Phase 0: is the brain fast enough for voice?
+python test_conversation.py   # Phase 1: memory, style, honesty, no sycophancy, trimming, speed
+```
+
+## Known limitations (local 4B model)
+
+- Invents facts with confidence (dates, scores, results). Fix later: web search tool or cloud brain.
+- Unreliable at arithmetic. Fix in Phase 2: a calculator tool.
+- Occasionally drops a space between two words ("can'tdo").
+- Writes larger numbers as digits despite the prompt. Fix in Phase 3: number-to-words before TTS.
