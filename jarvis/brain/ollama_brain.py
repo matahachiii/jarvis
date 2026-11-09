@@ -3,6 +3,7 @@ Brain provider for local models running in Ollama.
 """
 
 import time
+from collections.abc import Iterator
 
 from ollama import Client
 
@@ -23,15 +24,17 @@ class OllamaBrain(Brain):
     def name(self) -> str:
         return f"ollama/{self.model}"
 
-    def chat(self, messages: list[dict], tools: list | None = None) -> BrainResponse:
+    def chat_stream(self, messages: list[dict], tools: list | None = None) -> Iterator[str]:
+        # Reset first, so stats from a previous answer can never be mistaken for this one.
+        # Note: if the caller stops early (e.g. Ctrl+C), last_response stays None.
+        self.last_response = None
+
         start = time.perf_counter()
         first_token_s = None   # first token of any kind (thinking or answer)
         first_answer_s = None  # first token of the actual answer
         text_parts, thinking_parts, tool_calls = [], [], []
         final_chunk = None
 
-        # stream=True: the answer arrives piece by piece, so we can measure
-        # how fast the first word appears (crucial for voice later)
         stream = self.client.chat(
             model=self.model,
             messages=messages,
@@ -42,6 +45,7 @@ class OllamaBrain(Brain):
             options={
                 "temperature": self.settings.get("temperature", 0.6),
                 "num_ctx": self.settings.get("context_length", 4096),
+                "num_predict": self.settings.get("max_tokens", 1024),  # safety brake on answer length
             },
         )
 
@@ -60,6 +64,7 @@ class OllamaBrain(Brain):
                     first_token_s = elapsed
                 if first_answer_s is None:
                     first_answer_s = elapsed
+                yield message.content  # hand this piece to the caller right away
 
             if message.tool_calls:
                 tool_calls.extend(message.tool_calls)
@@ -81,13 +86,14 @@ class OllamaBrain(Brain):
             eval_count = final_chunk.eval_count or 0
             eval_duration = (final_chunk.eval_duration or 0) / ns
             stats.update({
+                "done_reason": final_chunk.done_reason,  # "stop" = finished, "length" = cut off by max_tokens
                 "load_s": (final_chunk.load_duration or 0) / ns,
                 "prompt_tokens": final_chunk.prompt_eval_count,
                 "output_tokens": eval_count,
                 "tokens_per_s": eval_count / eval_duration if eval_duration else None,
             })
 
-        return BrainResponse(
+        self.last_response = BrainResponse(
             text="".join(text_parts).strip(),
             thinking="".join(thinking_parts).strip(),
             tool_calls=tool_calls,
