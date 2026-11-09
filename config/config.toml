@@ -24,6 +24,11 @@ temperature = 0.6
 # Context window in tokens. Smaller = less RAM, but shorter memory per conversation.
 context_length = 4096
 
+
+# Maximum length of one answer in tokens (safety brake).
+# Also reserved in the context window, so the answer always fits.
+max_tokens = 512
+
 [brain.ollama]
 model = "qwen3:4b-instruct-2507-q4_K_M"
 host = "http://localhost:11434"
