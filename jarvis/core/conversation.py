@@ -1,9 +1,17 @@
 """
 Conversation memory for one session: the system prompt plus the message history.
 
-Keeps the conversation within the model's context window by dropping the
-oldest user/assistant turns (in pairs). The system prompt is never dropped.
+The history is a flat list of messages, grouped into TURNS. A turn starts with
+a user message and contains everything until the next user message:
+
+    user -> [assistant with tool_calls -> tool results]* -> final assistant answer
+
+Trimming drops whole turns (oldest first), so a tool result is never left
+without the request that caused it. The system prompt and the current turn
+are never dropped.
 """
+
+import json
 
 CHARS_PER_TOKEN = 4    # rough average for English text
 MESSAGE_OVERHEAD = 4   # chat-template tokens around each message (role markers etc.)
@@ -15,55 +23,99 @@ def estimate_tokens(text: str) -> int:
 
 
 class Conversation:
-    """Holds the system prompt and the user/assistant history of one session."""
+    """Holds the system prompt and the message history (grouped in turns) of one session."""
 
     def __init__(self, system_prompt: str, context_length: int = 4096,
                  max_tokens: int = 1024, safety_margin: int = 64):
         self.system = {"role": "system", "content": system_prompt,
                        "tokens": estimate_tokens(system_prompt)}
-        self.history: list[dict] = []  # user/assistant messages, oldest first, strictly alternating
+        self.history: list[dict] = []  # all messages after the system prompt, oldest first
         # Room for system prompt + history + new user message;
         # max_tokens stays free for the answer, safety_margin covers estimation errors.
         self.budget = context_length - max_tokens - safety_margin
-        self.dropped_turns = 0  # how many user/assistant pairs were trimmed this session
+        self.dropped_turns = 0  # how many whole turns were trimmed this session
 
     @property
     def messages(self) -> list[dict]:
         """The conversation in the format the brain expects (without our internal token counts)."""
-        return [{"role": m["role"], "content": m["content"]} for m in [self.system, *self.history]]
+        return [{k: v for k, v in m.items() if k != "tokens"} for m in [self.system, *self.history]]
 
     def total_tokens(self) -> int:
         """Current size of everything that would be sent to the model."""
         return self.system["tokens"] + sum(m["tokens"] for m in self.history)
 
+    # ------------------------------------------------------------ adding messages
     def add_user(self, text: str) -> None:
-        """Add a user message, then trim so the next request fits the budget."""
+        """Start a new turn with a user message, then trim so the next request fits the budget."""
         self.history.append({"role": "user", "content": text, "tokens": estimate_tokens(text)})
         self.trim()
 
+    def add_tool_call(self, text: str, tool_calls: list[dict], stats: dict | None = None) -> None:
+        """
+        Add an assistant message that asks for tools.
+        tool_calls: [{"name": "open_app", "arguments": {"app_name": "Spotify"}}, ...]
+        """
+        calls = [{"function": {"name": c["name"], "arguments": c.get("arguments") or {}}}
+                 for c in tool_calls]
+        estimate = estimate_tokens(text + json.dumps(calls, default=str))
+        self.history.append({"role": "assistant", "content": text,
+                             "tool_calls": calls, "tokens": estimate})
+        if stats:
+            self._calibrate(stats)
+
+    def add_tool_result(self, name: str, content: str) -> None:
+        """Add the result of one tool call, then trim so the next request fits."""
+        self.history.append({"role": "tool", "tool_name": name, "content": content,
+                             "tokens": estimate_tokens(content)})
+        self.trim()
+
     def add_assistant(self, text: str, stats: dict | None = None) -> None:
-        """Add the assistant's answer and, if available, calibrate token counts with Ollama's real numbers."""
+        """Add the final answer of a turn and, if available, calibrate with Ollama's real numbers."""
         self.history.append({"role": "assistant", "content": text, "tokens": estimate_tokens(text)})
         if stats:
             self._calibrate(stats)
 
+    # ------------------------------------------------------------ trimming and undo
+    def _turn_starts(self) -> list[int]:
+        """Positions of the user messages: every turn starts at one of these."""
+        return [i for i, m in enumerate(self.history) if m["role"] == "user"]
+
     def trim(self) -> None:
-        """Drop the oldest user/assistant pair until we fit. Never drops the newest user message."""
-        while self.total_tokens() > self.budget and len(self.history) > 1:
-            del self.history[:2]
+        """Drop the oldest whole turn until we fit. Never drops the current (newest) turn."""
+        while self.total_tokens() > self.budget:
+            starts = self._turn_starts()
+            if len(starts) < 2:
+                break  # only the current turn is left
+            del self.history[:starts[1]]
             self.dropped_turns += 1
+
+    def undo_last_user(self) -> None:
+        """
+        Remove the current turn if it has no final answer yet (answer failed or was
+        interrupted): the user message plus any tool calls and tool results after it.
+        A finished turn is left alone.
+        """
+        starts = self._turn_starts()
+        if not starts:
+            return
+        last = self.history[-1]
+        finished = last["role"] == "assistant" and not last.get("tool_calls")
+        if not finished:
+            del self.history[starts[-1]:]
 
     def reset(self) -> None:
         """Forget the conversation, keep the system prompt."""
         self.history.clear()
         self.dropped_turns = 0
 
+    # ------------------------------------------------------------ token calibration
     def _calibrate(self, stats: dict) -> None:
         """
-        Use Ollama's real token counts after an answer, so total_tokens() matches reality.
+        Use Ollama's real token counts after any assistant message (tool call or final
+        answer), so total_tokens() matches reality.
 
-        prompt_tokens = everything we sent (system + history up to the last user message)
-        output_tokens = the answer itself (exact)
+        prompt_tokens = everything we sent (system + history before this assistant message)
+        output_tokens = this assistant message itself (exact)
         Our estimation error on what we sent is parked on the system prompt's count:
         the system prompt is never dropped, so the correction stays valid.
         """
@@ -75,8 +127,3 @@ class Conversation:
         if prompt_tokens:
             sent_estimate = self.system["tokens"] + sum(m["tokens"] for m in self.history[:-1])
             self.system["tokens"] = max(1, self.system["tokens"] + prompt_tokens - sent_estimate)
-
-    def undo_last_user(self) -> None:
-        """Remove the last user message, e.g. when its answer failed or was interrupted."""
-        if self.history and self.history[-1]["role"] == "user":
-            self.history.pop()
