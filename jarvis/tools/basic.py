@@ -9,6 +9,7 @@ import ast
 import math
 import operator
 import re
+from datetime import datetime
 
 from jarvis.tools.registry import ToolResult, tool
 
@@ -87,3 +88,64 @@ def calculator(expression):
     except ValueError as error:
         return ToolResult(False, f"Could not calculate '{expression}': {error}.")
     return ToolResult(True, f"{expression} = {result}")
+
+
+
+# ------------------------------------------------------------ date and time
+_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+          "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+          "eighteen", "nineteen", "twenty", "twenty-one", "twenty-two", "twenty-three",
+          "twenty-four", "twenty-five", "twenty-six", "twenty-seven", "twenty-eight", "twenty-nine"]
+
+
+def _part_of_day(hour: int) -> str:
+    if 5 <= hour < 12:
+        return "in the morning"
+    if 12 <= hour < 18:
+        return "in the afternoon"
+    if 18 <= hour < 22:
+        return "in the evening"
+    return "at night"
+
+
+def spoken_time(hour: int, minute: int) -> str:
+    """22:52 -> 'eight minutes to eleven at night' (British style, as a butler would say it)."""
+    if minute == 0:
+        if hour == 0:
+            return "midnight"
+        if hour == 12:
+            return "noon"
+        return f"{_WORDS[hour % 12 or 12]} o'clock {_part_of_day(hour)}"
+
+    if minute <= 30:
+        amount, link, target = minute, "past", hour
+    else:
+        amount, link, target = 60 - minute, "to", (hour + 1) % 24
+
+    if amount == 15:
+        amount_words = "a quarter"
+    elif amount == 30:
+        amount_words = "half"
+    elif amount % 5 == 0:
+        amount_words = _WORDS[amount]
+    else:
+        amount_words = f"{_WORDS[amount]} minute{'s' if amount > 1 else ''}"
+
+    if target == 0:
+        target_words = "midnight"
+    elif target == 12 and link == "to":
+        target_words = "noon"
+    else:
+        target_words = f"{_WORDS[target % 12 or 12]} {_part_of_day(target)}"
+    return f"{amount_words} {link} {target_words}"
+
+
+def describe_moment(moment: datetime) -> str:
+    """The date and time as the model should read them: exact, plus a spoken form."""
+    date = f"{moment:%A} {moment.day} {moment:%B %Y}"
+    return f"It is {date}, {moment:%H:%M}, which is {spoken_time(moment.hour, moment.minute)}."
+
+
+@tool("Get the current date and time. Use it whenever sir asks for the time, the date or the day.")
+def get_time():
+    return ToolResult(True, describe_moment(datetime.now()))
