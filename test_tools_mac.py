@@ -66,6 +66,11 @@ class TestFindApp(FakeAppsTestCase):
         self.assertEqual(self.find("Photoshop"), (None, []))
         self.assertEqual(self.find(""), (None, []))
 
+    def test_typo_gives_close_suggestion(self):
+        bundle, suggestions = mac_apps.find_app("Calculater", self.apps)
+        self.assertIsNone(bundle)   # never guess: only suggest
+        self.assertEqual(suggestions, ["Calculator"])
+
 
 class TestOpenApp(FakeAppsTestCase):
 
@@ -98,6 +103,19 @@ class TestQuitApp(FakeAppsTestCase):
         result = mac_apps.quit_app("Finder")
         self.assertFalse(result.success)
         self.assertIn("protected", result.message)
+        run.assert_not_called()
+
+    @mock.patch("jarvis.tools.mac_apps.subprocess.run")
+    def test_protected_even_when_not_in_the_index(self, run):
+        with mock.patch.object(mac_apps, "installed_apps", return_value={}):   # Finder lives outside /Applications
+            result = mac_apps.quit_app("finder")
+        self.assertFalse(result.success)
+        self.assertIn("Finder is protected", result.message)
+        run.assert_not_called()
+
+    @mock.patch("jarvis.tools.mac_apps.subprocess.run")
+    def test_protected_through_alias(self, run):
+        self.assertIn("protected", mac_apps.quit_app("vs code").message)   # would stop Jarvis himself
         run.assert_not_called()
 
     @mock.patch("jarvis.tools.mac_apps.subprocess.run", return_value=done("false\n"))

@@ -7,8 +7,10 @@ Safety:
   separate argument (argv), so a name is never pasted into script text.
 - Quitting is a "confirm" tool and always a polite quit, never a force-kill.
 - Some apps are protected: quitting them would break the Mac or stop Jarvis himself.
+  That check happens FIRST, by name, so it also covers system apps outside /Applications.
 """
 
+import difflib
 import subprocess
 import time
 from pathlib import Path
@@ -31,6 +33,21 @@ QUIT_WAIT_S = 3.0         # an app needs a moment to really close after "quit"
 
 
 # ------------------------------------------------------------ helpers (pure, easy to test)
+def _normalise_name(name: str) -> str:
+    """'  Safari.app ' -> 'safari', 'VS Code' -> 'visual studio code'."""
+    wanted = name.strip().lower().removesuffix(".app").strip()
+    return ALIASES.get(wanted, wanted)
+
+
+def protected_name(name: str) -> str | None:
+    """The protected app this name refers to (e.g. 'finder' -> 'Finder'), or None."""
+    wanted = _normalise_name(name)
+    for app in PROTECTED:
+        if app.lower() == wanted:
+            return app
+    return None
+
+
 def installed_apps(folders=APP_FOLDERS) -> dict[str, Path]:
     """{'spotify': Path('/Applications/Spotify.app'), ...}: lowercase name -> app bundle."""
     apps = {}
@@ -43,13 +60,16 @@ def installed_apps(folders=APP_FOLDERS) -> dict[str, Path]:
 
 def find_app(name: str, apps: dict[str, Path]) -> tuple[Path | None, list[str]]:
     """Find an installed app by name. Returns (bundle, []) or (None, suggestions)."""
-    wanted = name.strip().lower().removesuffix(".app").strip()
-    wanted = ALIASES.get(wanted, wanted)
+    wanted = _normalise_name(name)
+    if not wanted:
+        return None, []
     if wanted in apps:
         return apps[wanted], []
-    matches = sorted(key for key in apps if wanted and wanted in key)
+    matches = sorted(key for key in apps if wanted in key)
     if len(matches) == 1:
         return apps[matches[0]], []
+    if not matches:   # no partial match: look for typos, e.g. "texteditor" -> "textedit"
+        matches = difflib.get_close_matches(wanted, list(apps), n=MAX_SUGGESTIONS, cutoff=0.6)
     return None, [apps[key].stem for key in matches[:MAX_SUGGESTIONS]]
 
 
@@ -58,6 +78,10 @@ def _not_found(app_name: str, suggestions: list[str]) -> ToolResult:
         return ToolResult(False, f"No app called '{app_name}' is installed. "
                                  f"Did you mean: {', '.join(suggestions)}?")
     return ToolResult(False, f"No app called '{app_name}' is installed on this Mac.")
+
+
+def _protected(name: str) -> ToolResult:
+    return ToolResult(False, f"{name} is protected: quitting it would disrupt the Mac or Jarvis himself.")
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
@@ -103,15 +127,19 @@ def open_app(app_name):
     return ToolResult(True, f"Opened {bundle.stem}.")
 
 
-@tool("Quit a running application on this Mac. Sir is asked to confirm first.",
+@tool("Quit an application on this Mac. Always use this tool to quit an app: it checks by itself "
+      "whether the app is running or protected. Sir is asked to confirm first.",
       {"app_name": ("string", "The application's name, e.g. Spotify")}, risk="confirm", timeout_s=15)
 def quit_app(app_name):
+    protected = protected_name(app_name)       # first, so system apps outside /Applications are covered
+    if protected:
+        return _protected(protected)
     bundle, suggestions = find_app(app_name, installed_apps())
     if bundle is None:
         return _not_found(app_name, suggestions)
     name = bundle.stem
-    if name in PROTECTED:
-        return ToolResult(False, f"{name} is protected: quitting it would disrupt the Mac or Jarvis himself.")
+    if name in PROTECTED:                      # e.g. an alias or partial name that led to a protected app
+        return _protected(name)
     if not is_running(name):
         return ToolResult(False, f"{name} is not running, so there was nothing to quit.")
 
