@@ -8,3 +8,4 @@ from jarvis.tools.registry import ToolResult, registry, tool  # noqa: F401
 
 # Importing a module is what registers its tools (the @tool decorators run on import)
 from jarvis.tools import basic  # noqa: F401
+from jarvis.tools import mac_apps  # noqa: F401
