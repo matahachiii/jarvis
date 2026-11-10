@@ -52,6 +52,9 @@ def ask_confirmation(tool, args: dict) -> bool:
     except EOFError:  # Ctrl+D counts as no
         print()
         return False
+    except KeyboardInterrupt:  # Ctrl+C: end the "Allow?" line, then let the whole turn stop
+        print()
+        raise
     return reply in ("y", "yes")
 
 
