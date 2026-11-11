@@ -45,9 +45,13 @@ class FakeSpotify:
 class SpotifyTestCase(unittest.TestCase):
 
     def setUp(self):
-        for target, value in [("installed_apps", {"spotify": Path("/Applications/Spotify.app")}),
-                              ("SETTLE_S", 0)]:
-            patcher = mock.patch.object(media, target, value if target == "SETTLE_S" else mock.Mock(return_value=value))
+        patches = [
+            mock.patch.object(media, "installed_apps",
+                              mock.Mock(return_value={"spotify": Path("/Applications/Spotify.app")})),
+            mock.patch.object(media, "SETTLE_S", 0),
+            mock.patch.object(media, "STATE_WAIT_S", 0.3),   # don't make failure tests wait 3 seconds
+        ]
+        for patcher in patches:
             patcher.start()
             self.addCleanup(patcher.stop)
 
