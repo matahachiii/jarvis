@@ -129,10 +129,10 @@ def volume(action, level=None):
 
     if action in ("mute", "unmute"):
         _set_muted(action == "mute")
-        _, now_muted = volume_settings()
+        now_level, now_muted = volume_settings()   # read again: some Macs restore an older level on unmute
         if now_muted != (action == "mute"):
             return ToolResult(False, "macOS did not change the mute setting.")
-        return ToolResult(True, "Sound is muted." if now_muted else f"Sound is on, at {before} percent.")
+        return ToolResult(True, "Sound is muted." if now_muted else f"Sound is on, at {now_level} percent.")
 
     if action == "set":
         if level is None:

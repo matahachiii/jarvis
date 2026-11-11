@@ -224,6 +224,11 @@ class TestVolume(unittest.TestCase):
         self.assertEqual(audio.level, 30)
         self.assertEqual(registry.get("volume").risk, "safe")
 
+    def test_unmute_reports_the_real_level(self):
+        # some Macs restore an older level on unmute: report what is really set now
+        with mock.patch.object(media, "volume_settings", side_effect=[(25, True), (13, False)]), \
+             mock.patch.object(media, "_set_muted"):
+            self.assertEqual(media.volume("unmute").message, "Sound is on, at 13 percent.")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
