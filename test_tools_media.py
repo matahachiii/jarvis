@@ -1,6 +1,6 @@
 """
-Unit tests for the media tools (Phase 2, step 4.4). Nothing touches the real Mac:
-a fake osascript answers like Spotify would, and records every script it got.
+Unit tests for the media tools (Phase 2, steps 4.4 and 4.5). Nothing touches the real Mac:
+fakes answer like Spotify / the Mac's sound settings would, and record every script they got.
 
 Usage:  python -m unittest test_tools_media -v
 """
@@ -18,6 +18,7 @@ def done(stdout="", returncode=0, stderr=""):
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
+# ============================================================ Spotify
 class FakeSpotify:
     """Stands in for subprocess.run: answers like Spotify, records every script line."""
 
@@ -124,6 +125,104 @@ class TestSpotifyRegistration(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("must be one of", result.message)
         run.assert_not_called()
+
+
+# ============================================================ Volume
+class FakeAudio:
+    """Stands in for subprocess.run: behaves like the Mac's sound settings."""
+
+    def __init__(self, start=40, muted=False, stuck=False, report="normal"):
+        self.level, self.muted, self.stuck, self.report = start, muted, stuck, report
+        self.scripts = []
+
+    def __call__(self, args, **kwargs):
+        self.scripts.append(args)
+        script = " ".join(args)
+        if "get volume settings" in script:
+            if self.report == "missing":
+                return done(f"missing value{media.SEPARATOR}false\n")
+            return done(f"{self.level}{media.SEPARATOR}{'true' if self.muted else 'false'}\n")
+        if "output volume ((item 1 of argv)" in script:
+            if not self.stuck:
+                self.level = int(args[-1])
+            return done()
+        if "output muted true" in script:
+            self.muted = True
+        elif "output muted false" in script:
+            self.muted = False
+        return done()
+
+
+class TestVolume(unittest.TestCase):
+
+    def run_tool(self, action, level=None, **fake_args):
+        """Run the volume tool against a fake Mac (fake_args: start, muted, stuck, report)."""
+        self.audio = FakeAudio(**fake_args)
+        with mock.patch("jarvis.tools.mac_apps.subprocess.run", self.audio):
+            return media.volume(action, level)
+
+    def test_get(self):
+        self.assertEqual(self.run_tool("get").message, "The volume is 40 percent.")
+
+    def test_get_while_muted(self):
+        self.assertIn("muted", self.run_tool("get", muted=True).message)
+
+    def test_set(self):
+        result = self.run_tool("set", 30)
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, "The volume is now 30 percent (it was 40).")
+        set_command = next(a for a in self.audio.scripts if "argv" in " ".join(a))
+        self.assertEqual(set_command[-1], "30")                    # the level arrives as argv ...
+        self.assertNotIn("30", " ".join(set_command[:-1]))         # ... never inside the script
+
+    def test_set_needs_a_level(self):
+        self.assertFalse(self.run_tool("set").success)
+
+    def test_set_out_of_range_changes_nothing(self):
+        result = self.run_tool("set", 150)
+        self.assertFalse(result.success)
+        self.assertEqual(self.audio.level, 40)
+
+    def test_up(self):
+        self.assertEqual(self.run_tool("up").message, "The volume is now 50 percent (it was 40).")
+
+    def test_up_never_above_100(self):
+        self.assertEqual(self.run_tool("up", start=95).message, "The volume is now 100 percent (it was 95).")
+
+    def test_down(self):
+        self.assertEqual(self.run_tool("down").message, "The volume is now 30 percent (it was 40).")
+
+    def test_down_never_below_zero(self):
+        self.assertEqual(self.run_tool("down", start=5).message, "The volume is now 0 percent (it was 5).")
+
+    def test_changing_volume_unmutes(self):
+        result = self.run_tool("set", 25, muted=True)
+        self.assertTrue(result.success)
+        self.assertFalse(self.audio.muted)
+
+    def test_mute_and_unmute(self):
+        self.assertEqual(self.run_tool("mute").message, "Sound is muted.")
+        self.assertTrue(self.audio.muted)
+        self.assertEqual(self.run_tool("unmute", muted=True).message, "Sound is on, at 40 percent.")
+
+    def test_volume_that_does_not_change_is_a_failure(self):
+        result = self.run_tool("set", 70, stuck=True)
+        self.assertFalse(result.success)
+        self.assertIn("not 70", result.message)
+
+    def test_output_without_volume_fails_gracefully(self):
+        with mock.patch("jarvis.tools.mac_apps.subprocess.run", FakeAudio(report="missing")):
+            result = registry.execute("volume", {"action": "get"})
+        self.assertFalse(result.success)
+        self.assertIn("no adjustable volume", result.message)
+
+    def test_through_registry_with_text_level(self):
+        audio = FakeAudio()
+        with mock.patch("jarvis.tools.mac_apps.subprocess.run", audio):
+            result = registry.execute("volume", {"action": "set", "level": "30"})   # small models send "30"
+        self.assertTrue(result.success)
+        self.assertEqual(audio.level, 30)
+        self.assertEqual(registry.get("volume").risk, "safe")
 
 
 if __name__ == "__main__":
