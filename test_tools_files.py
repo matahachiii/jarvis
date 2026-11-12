@@ -1,8 +1,8 @@
 """
-Unit tests for the file search tool (Phase 2, step 4.6).
+Unit tests for the file tools (Phase 2, steps 4.6 and 4.7).
 
 Nothing touches the real Mac: real files are made in a temporary folder that plays
-"home", and mdfind is replaced by a fake that lists them (plus some noise).
+"home", and mdfind / open are replaced by fakes that only record the command.
 
 Usage:  python -m unittest test_tools_files -v
 """
@@ -28,7 +28,7 @@ class FakeHomeTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         # (relative path, days ago it was modified)
         self.make("Documents/thesis_draft.docx", days_ago=30)
         self.make("Desktop/thesis_final.pdf", days_ago=1)
@@ -40,7 +40,7 @@ class FakeHomeTestCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def make(self, relative, days_ago, folder=False):
+    def make(self, relative, days_ago=0, folder=False):
         path = self.root / relative
         if folder:
             path.mkdir(parents=True, exist_ok=True)
@@ -62,7 +62,13 @@ class FakeHomeTestCase(unittest.TestCase):
         with mock.patch("jarvis.tools.mac_apps.subprocess.run", self.run):
             return files.search_files(query)
 
+    def open(self, target, run=None):
+        self.run = run or mock.Mock(return_value=done())
+        with mock.patch("jarvis.tools.mac_apps.subprocess.run", self.run):
+            return files.open_item(target)
 
+
+# ============================================================ search_files
 class TestSearchFiles(FakeHomeTestCase):
 
     def test_command_is_safe(self):
@@ -123,6 +129,91 @@ class TestSearchRegistration(FakeHomeTestCase):
             self.assertFalse(registry.execute("search_files", {"query": "   "}).success)
             self.assertFalse(registry.execute("search_files", {"query": "x" * 1000}).success)
         run.assert_not_called()
+
+
+# ============================================================ open_item: web pages
+class TestOpenWeb(FakeHomeTestCase):
+
+    def test_https_url(self):
+        result = self.open("https://www.vub.be")
+        self.assertTrue(result.success)
+        self.assertEqual(self.run.call_args[0][0], ["open", "https://www.vub.be"])
+
+    def test_bare_domains_become_https(self):
+        for target, url in [("www.youtube.com", "https://www.youtube.com"), ("vub.be", "https://vub.be"),
+                            ("github.com/matahachiii", "https://github.com/matahachiii")]:
+            with self.subTest(target=target):
+                self.open(target)
+                self.assertEqual(self.run.call_args[0][0], ["open", url])
+
+    def test_file_names_are_not_mistaken_for_websites(self):
+        self.assertIsNone(files.as_url("report.pdf"))
+        self.assertIsNone(files.as_url("notes.txt"))
+
+    def test_other_schemes_are_refused(self):
+        for target in ["javascript:alert(1)", "file:///etc/passwd", "ftp://example.com", "ssh://server"]:
+            with self.subTest(target=target):
+                run = mock.Mock()
+                self.assertFalse(self.open(target, run=run).success)
+                run.assert_not_called()
+
+
+# ============================================================ open_item: files and folders
+class TestOpenFiles(FakeHomeTestCase):
+
+    def test_file_from_search_result(self):
+        result = self.open("~/Desktop/thesis_final.pdf")
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, "Opened ~/Desktop/thesis_final.pdf.")
+        self.assertEqual(self.run.call_args[0][0], ["open", str(self.root / "Desktop/thesis_final.pdf")])
+
+    def test_relative_path_is_inside_home(self):
+        self.assertTrue(self.open("Documents/thesis_draft.docx").success)
+
+    def test_folder_opens_in_finder(self):
+        self.assertEqual(self.open("~/Documents/Thesis").message, "Opened ~/Documents/Thesis in Finder.")
+
+    def test_missing_file(self):
+        result = self.open("~/Documents/nope.pdf")
+        self.assertFalse(result.success)
+        self.assertIn("search_files", result.message)
+        self.run.assert_not_called()
+
+    def test_outside_home_is_refused(self):
+        for target in ["/etc/hosts", "~/../../etc/hosts", "../../../etc/hosts"]:
+            with self.subTest(target=target):
+                run = mock.Mock()
+                self.assertFalse(self.open(target, run=run).success)
+                run.assert_not_called()
+
+    def test_symlink_out_of_home_is_refused(self):
+        (self.root / "sneaky_link").symlink_to("/etc")
+        run = mock.Mock()
+        self.assertFalse(self.open("~/sneaky_link/hosts", run=run).success)
+        run.assert_not_called()
+
+    def test_programs_and_scripts_are_never_opened(self):
+        self.make("Desktop/run_me.command")
+        self.make("Desktop/install.sh")
+        self.make("Desktop/script.py")
+        self.make("Applications/Evil.app", folder=True)
+        executable = self.make("Desktop/no_extension_tool")
+        executable.chmod(0o755)
+        for target in ["~/Desktop/run_me.command", "~/Desktop/install.sh", "~/Desktop/script.py",
+                       "~/Applications/Evil.app", "~/Desktop/no_extension_tool"]:
+            with self.subTest(target=target):
+                run = mock.Mock()
+                result = self.open(target, run=run)
+                self.assertFalse(result.success)
+                self.assertIn("never opened", result.message)
+                run.assert_not_called()
+
+    def test_open_failure_is_reported(self):
+        result = self.open("~/Desktop/thesis_final.pdf", run=mock.Mock(return_value=done(returncode=1, stderr="boom")))
+        self.assertFalse(result.success)
+
+    def test_safe_in_registry(self):
+        self.assertEqual(registry.get("open_item").risk, "safe")
 
 
 if __name__ == "__main__":
