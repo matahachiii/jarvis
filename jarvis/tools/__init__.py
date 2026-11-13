@@ -11,3 +11,4 @@ from jarvis.tools import basic  # noqa: F401
 from jarvis.tools import mac_apps  # noqa: F401
 from jarvis.tools import media  # noqa: F401
 from jarvis.tools import files  # noqa: F401
+from jarvis.tools import weather  # noqa: F401
