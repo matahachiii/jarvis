@@ -7,6 +7,9 @@ The agent loop: answer one user turn, calling tools when the model asks for them
 Used by the chat loop and by the tests, so both run exactly the same code.
 How text, tool calls and confirmations are shown is up to the caller (callbacks),
 so this file knows nothing about the terminal (or, in Phase 3, the voice).
+
+Safety-critical outcomes are not left to the model's wording: when sir declines every
+action of a round, the answer is a fixed sentence (the model once invented a reason).
 """
 
 import json
@@ -19,6 +22,7 @@ from jarvis.tools.registry import Tool, ToolRegistry, ToolResult
 
 MAX_TOOL_ROUNDS = 5   # tool rounds per user turn; after that the model must answer
 CAP_MESSAGE = "I'm afraid I couldn't finish that, sir."
+DECLINED_MESSAGE = "Very well, sir. Nothing was done."
 
 
 def _noop(*args, **kwargs) -> None:
@@ -113,9 +117,18 @@ def run_turn(brain, conversation: Conversation, registry: ToolRegistry | None,
         # Execute every tool call of this round, in order, and feed the results back
         calls = _parse_calls(reply.tool_calls)
         conversation.add_tool_call(text, calls, reply.stats)
+        round_runs = []
         for call in calls:
             on_tool_call(call["name"], call["arguments"])
             result = registry.execute(call["name"], call["arguments"], confirm=confirm)
             on_tool_result(call["name"], call["arguments"], result)
-            runs.append(ToolRun(call["name"], call["arguments"], result))
+            run = ToolRun(call["name"], call["arguments"], result)
+            round_runs.append(run)
+            runs.append(run)
             conversation.add_tool_result(call["name"], format_tool_result(result))
+
+        # Sir said no to everything this round: a fixed, honest answer instead of the model's wording
+        if all(r.result.confirmed is False for r in round_runs):
+            on_text((" " if text else "") + DECLINED_MESSAGE)
+            conversation.add_assistant(DECLINED_MESSAGE)
+            return TurnResult(DECLINED_MESSAGE, DECLINED_MESSAGE, reply.stats, runs, rounds)

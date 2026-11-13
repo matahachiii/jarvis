@@ -145,7 +145,6 @@ def describe_moment(moment: datetime) -> str:
     date = f"{moment:%A} {moment.day} {moment:%B %Y}"
     return f"It is {date}, {moment:%H:%M}, which is {spoken_time(moment.hour, moment.minute)}."
 
-
 @tool("Get the current date and time. Use it whenever sir asks for the time, the date or the day.")
 def get_time():
     return ToolResult(True, describe_moment(datetime.now()))

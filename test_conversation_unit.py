@@ -122,6 +122,39 @@ class TestCalibration(unittest.TestCase):
         conv.add_assistant("A quarter past ten, sir.", {"prompt_tokens": 950, "output_tokens": 9})
         self.assertEqual(conv.total_tokens(), 950 + 9 + MESSAGE_OVERHEAD)
 
+class TestExamples(unittest.TestCase):
 
+    EXAMPLES = [
+        {"role": "user", "content": "Quit Notes."},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"function": {"name": "quit_app", "arguments": {"app_name": "Notes"}}}]},
+        {"role": "tool", "tool_name": "quit_app", "content": "SUCCESS: Closed Notes."},
+        {"role": "assistant", "content": "Notes is closed, sir."},
+    ]
+
+    def test_examples_come_right_after_the_system_prompt(self):
+        conv = Conversation("sys", examples=self.EXAMPLES)
+        conv.add_user("Hello")
+        self.assertEqual([m["role"] for m in conv.messages],
+                         ["system", "user", "assistant", "tool", "assistant", "user"])
+        self.assertEqual(conv.messages[1:5], self.EXAMPLES)
+
+    def test_examples_are_never_trimmed_or_reset(self):
+        conv = Conversation("x" * 400, context_length=600, max_tokens=100, safety_margin=0,
+                            examples=self.EXAMPLES)
+        for _ in range(5):
+            conv.add_user("z" * 400)
+            conv.add_assistant("a")
+        self.assertGreater(conv.dropped_turns, 0)
+        self.assertEqual(conv.messages[1:5], self.EXAMPLES)
+        conv.reset()
+        self.assertEqual(conv.messages[1:5], self.EXAMPLES)
+        self.assertEqual(conv.history, [])
+
+    def test_calibration_includes_examples(self):
+        conv = Conversation("sys", examples=self.EXAMPLES)
+        conv.add_user("Hello")
+        conv.add_assistant("Good evening, sir.", {"prompt_tokens": 500, "output_tokens": 5})
+        self.assertEqual(conv.total_tokens(), 500 + 5 + MESSAGE_OVERHEAD)
 if __name__ == "__main__":
     unittest.main(verbosity=2)

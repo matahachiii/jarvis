@@ -1,5 +1,6 @@
 """
-Conversation memory for one session: the system prompt plus the message history.
+Conversation memory for one session: the system prompt, fixed example exchanges,
+and the message history.
 
 The history is a flat list of messages, grouped into TURNS. A turn starts with
 a user message and contains everything until the next user message:
@@ -7,8 +8,8 @@ a user message and contains everything until the next user message:
     user -> [assistant with tool_calls -> tool results]* -> final assistant answer
 
 Trimming drops whole turns (oldest first), so a tool result is never left
-without the request that caused it. The system prompt and the current turn
-are never dropped.
+without the request that caused it. The system prompt, the examples and the
+current turn are never dropped.
 """
 
 import json
@@ -22,15 +23,26 @@ def estimate_tokens(text: str) -> int:
     return len(text) // CHARS_PER_TOKEN + MESSAGE_OVERHEAD
 
 
+def estimate_message(message: dict) -> int:
+    """Estimate for a whole message, including any tool calls in it."""
+    text = message.get("content", "")
+    if message.get("tool_calls"):
+        text += json.dumps(message["tool_calls"], default=str)
+    return estimate_tokens(text)
+
+
 class Conversation:
-    """Holds the system prompt and the message history (grouped in turns) of one session."""
+    """Holds the system prompt, the examples and the message history (grouped in turns) of one session."""
 
     def __init__(self, system_prompt: str, context_length: int = 4096,
-                 max_tokens: int = 1024, safety_margin: int = 64):
+                 max_tokens: int = 1024, safety_margin: int = 64, examples: list[dict] | None = None):
         self.system = {"role": "system", "content": system_prompt,
                        "tokens": estimate_tokens(system_prompt)}
-        self.history: list[dict] = []  # all messages after the system prompt, oldest first
-        # Room for system prompt + history + new user message;
+        # Fixed example exchanges (with real tool calls) that show the model how to behave.
+        # They come right after the system prompt and are never trimmed or reset.
+        self.examples = [{**m, "tokens": estimate_message(m)} for m in (examples or [])]
+        self.history: list[dict] = []  # all messages after the examples, oldest first
+        # Room for system prompt + examples + history + new user message;
         # max_tokens stays free for the answer, safety_margin covers estimation errors.
         self.budget = context_length - max_tokens - safety_margin
         self.dropped_turns = 0  # how many whole turns were trimmed this session
@@ -38,11 +50,16 @@ class Conversation:
     @property
     def messages(self) -> list[dict]:
         """The conversation in the format the brain expects (without our internal token counts)."""
-        return [{k: v for k, v in m.items() if k != "tokens"} for m in [self.system, *self.history]]
+        return [{k: v for k, v in m.items() if k != "tokens"}
+                for m in [self.system, *self.examples, *self.history]]
+
+    def _fixed_tokens(self) -> int:
+        """System prompt + examples: the part that is always sent."""
+        return self.system["tokens"] + sum(m["tokens"] for m in self.examples)
 
     def total_tokens(self) -> int:
         """Current size of everything that would be sent to the model."""
-        return self.system["tokens"] + sum(m["tokens"] for m in self.history)
+        return self._fixed_tokens() + sum(m["tokens"] for m in self.history)
 
     # ------------------------------------------------------------ adding messages
     def add_user(self, text: str) -> None:
@@ -57,9 +74,8 @@ class Conversation:
         """
         calls = [{"function": {"name": c["name"], "arguments": c.get("arguments") or {}}}
                  for c in tool_calls]
-        estimate = estimate_tokens(text + json.dumps(calls, default=str))
-        self.history.append({"role": "assistant", "content": text,
-                             "tool_calls": calls, "tokens": estimate})
+        message = {"role": "assistant", "content": text, "tool_calls": calls}
+        self.history.append({**message, "tokens": estimate_message(message)})
         if stats:
             self._calibrate(stats)
 
@@ -104,7 +120,7 @@ class Conversation:
             del self.history[starts[-1]:]
 
     def reset(self) -> None:
-        """Forget the conversation, keep the system prompt."""
+        """Forget the conversation, keep the system prompt and the examples."""
         self.history.clear()
         self.dropped_turns = 0
 
@@ -114,7 +130,7 @@ class Conversation:
         Use Ollama's real token counts after any assistant message (tool call or final
         answer), so total_tokens() matches reality.
 
-        prompt_tokens = everything we sent (system + history before this assistant message)
+        prompt_tokens = everything we sent (system + examples + history before this message)
         output_tokens = this assistant message itself (exact)
         Our estimation error on what we sent is parked on the system prompt's count:
         the system prompt is never dropped, so the correction stays valid.
@@ -125,5 +141,5 @@ class Conversation:
 
         prompt_tokens = stats.get("prompt_tokens")
         if prompt_tokens:
-            sent_estimate = self.system["tokens"] + sum(m["tokens"] for m in self.history[:-1])
+            sent_estimate = self._fixed_tokens() + sum(m["tokens"] for m in self.history[:-1])
             self.system["tokens"] = max(1, self.system["tokens"] + prompt_tokens - sent_estimate)

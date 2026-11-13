@@ -13,7 +13,7 @@ from jarvis.brain import create_brain
 from jarvis.core.agent import run_turn
 from jarvis.core.config import load_config
 from jarvis.core.conversation import Conversation
-from jarvis.core.personality import load_system_prompt
+from jarvis.core.personality import example_turns, load_system_prompt
 from jarvis.core.session_log import SessionLog
 from jarvis.tools.registry import ToolRegistry, registry
 

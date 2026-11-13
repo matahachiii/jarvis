@@ -1,5 +1,5 @@
 """
-Unit tests for the agent loop (Phase 2, step 3b).
+Unit tests for the agent loop (Phase 2, step 3b, plus the declined-round safety net).
 
 No LLM and no real Mac actions: a FakeBrain plays back scripted replies,
 and the tools are dummies that only record that they ran.
@@ -10,7 +10,7 @@ Usage:  python -m unittest test_agent -v
 import unittest
 
 from jarvis.brain.base import BrainResponse
-from jarvis.core.agent import CAP_MESSAGE, run_turn
+from jarvis.core.agent import CAP_MESSAGE, DECLINED_MESSAGE, run_turn
 from jarvis.core.conversation import Conversation
 from jarvis.tools.registry import ToolRegistry, ToolResult
 
@@ -123,11 +123,22 @@ class TestAgentLoop(unittest.TestCase):
 
     def test_confirm_tool_denied_is_not_executed(self):
         result = self.run_script([("", [call("quit_app", app_name="Spotify")]),
-                                  ("Very well, sir, Spotify stays open.", [])],
+                                  ("This should never be said.", [])],
                                  user="Quit Spotify", confirm=lambda tool, args: False)
         self.assertEqual(self.executed, [])
         self.assertFalse(result.tool_runs[0].result.confirmed)
-        self.assertTrue(self.brain.sent[1]["messages"][-1]["content"].startswith("FAILED: Sir declined"))
+        self.assertEqual(result.text, DECLINED_MESSAGE)   # fixed answer: the model is not asked again
+        self.assertEqual(len(self.brain.sent), 1)
+        self.assertEqual(self.conv.history[-1]["content"], DECLINED_MESSAGE)
+
+    def test_partly_declined_round_still_asks_the_model(self):
+        result = self.run_script(
+            [("", [call("open_app", app_name="Safari"), call("quit_app", app_name="Spotify")]),
+             ("Safari is open, sir, and Spotify stays open.", [])],
+            confirm=lambda tool, args: False)
+        self.assertEqual(self.executed, [("open_app", "Safari")])
+        self.assertEqual(len(self.brain.sent), 2)
+        self.assertEqual(result.text, "Safari is open, sir, and Spotify stays open.")
 
     def test_confirm_tool_without_callback_is_not_executed(self):
         self.run_script([("", [call("quit_app", app_name="Spotify")]), ("Understood.", [])])
