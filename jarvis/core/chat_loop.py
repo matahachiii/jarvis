@@ -157,6 +157,7 @@ def main() -> None:
         load_system_prompt(config),
         context_length=brain_cfg.get("context_length", 4096),
         max_tokens=brain_cfg.get("max_tokens", 512),
+        examples=example_turns(),
     )
 
     print(f"Starting {name} ({brain.name}, {len(registry.names)} tools)...")
