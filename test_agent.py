@@ -129,6 +129,8 @@ class TestAgentLoop(unittest.TestCase):
         self.assertFalse(result.tool_runs[0].result.confirmed)
         self.assertEqual(result.text, DECLINED_MESSAGE)   # fixed answer: the model is not asked again
         self.assertEqual(len(self.brain.sent), 1)
+        self.assertTrue(result.declined)
+        self.assertFalse(result.capped)
         self.assertEqual(self.conv.history[-1]["content"], DECLINED_MESSAGE)
 
     def test_partly_declined_round_still_asks_the_model(self):
@@ -139,6 +141,7 @@ class TestAgentLoop(unittest.TestCase):
         self.assertEqual(self.executed, [("open_app", "Safari")])
         self.assertEqual(len(self.brain.sent), 2)
         self.assertEqual(result.text, "Safari is open, sir, and Spotify stays open.")
+        self.assertFalse(result.declined)   # only PART of the round was declined
 
     def test_confirm_tool_without_callback_is_not_executed(self):
         self.run_script([("", [call("quit_app", app_name="Spotify")]), ("Understood.", [])])
@@ -159,6 +162,7 @@ class TestAgentLoop(unittest.TestCase):
         stuck = [("", [call("get_time")])] * 10   # a confused model that never stops asking
         result = self.run_script(stuck, max_tool_rounds=3)
         self.assertTrue(result.capped)
+        self.assertFalse(result.declined)
         self.assertEqual(result.rounds, 4)        # 3 tool rounds + the refused 4th
         self.assertEqual(len(self.executed), 3)
         self.assertEqual(result.text, CAP_MESSAGE)

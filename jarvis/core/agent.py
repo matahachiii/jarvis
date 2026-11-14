@@ -48,6 +48,7 @@ class TurnResult:
     tool_runs: list[ToolRun] = field(default_factory=list)
     rounds: int = 0                             # brain calls in this turn
     capped: bool = False                        # True if the round cap stopped the model
+    declined: bool = False                      # True if sir declined every action of a round
 
 
 def format_tool_result(result: ToolResult) -> str:
@@ -131,4 +132,4 @@ def run_turn(brain, conversation: Conversation, registry: ToolRegistry | None,
         if all(r.result.confirmed is False for r in round_runs):
             on_text((" " if text else "") + DECLINED_MESSAGE)
             conversation.add_assistant(DECLINED_MESSAGE)
-            return TurnResult(DECLINED_MESSAGE, DECLINED_MESSAGE, reply.stats, runs, rounds)
+            return TurnResult(DECLINED_MESSAGE, DECLINED_MESSAGE, reply.stats, runs, rounds, declined=True)

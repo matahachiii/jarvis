@@ -22,7 +22,7 @@ class SessionLog:
         self.path = folder / f"session_{started}.jsonl"
 
     def log(self, role: str, text: str, **extra) -> None:
-        """role: "system", "user", "assistant" or "event". Extra fields (stats, raw, ...) are added as-is."""
+        """role: "system", "user", "assistant", "tool" or "event". Extra fields (stats, raw, ...) are added as-is."""
         record = {"timestamp": datetime.now().isoformat(timespec="seconds"),
                   "role": role, "text": text, **extra}
         with self.path.open("a", encoding="utf-8") as f:

@@ -4,7 +4,7 @@ Text Jarvis: a terminal chat loop.
 Type a message and Jarvis streams his answer back, word by word. When a request
 needs a tool, the call is shown dimmed; "confirm" tools ask y/n first (default no).
 Commands start with "/" (type /help). Ctrl+C stops an answer; at the prompt it quits.
-Every session is saved as a JSONL transcript in logs/.
+Every session is saved as a JSONL transcript in logs/, with one "tool" line per tool call.
 """
 
 import readline  # noqa: F401  (importing it is enough: input() gets arrow-key history and line editing)
@@ -39,6 +39,19 @@ def describe_call(name: str, args) -> str:
     if isinstance(args, dict):
         args = ", ".join(f"{k}={v!r}" for k, v in args.items())
     return f"{name}({args})"
+
+
+def log_tool_run(log: SessionLog, tools: ToolRegistry, name: str, args, result) -> None:
+    """One "tool" line in the session log per tool call, also for refused and failed ones."""
+    tool = tools.get(name)
+    log.log("tool", describe_call(name, args),
+            tool=name,
+            arguments=args,
+            risk=tool.risk if tool else None,   # None = the model asked for a tool that does not exist
+            confirmed=result.confirmed,         # None = no confirmation needed (safe tool)
+            success=result.success,
+            message=result.message,
+            duration_s=result.duration_s)       # the tool itself only, not sir's y/N time
 
 
 def ask_confirmation(tool, args: dict) -> bool:
@@ -115,9 +128,15 @@ def print_tools(tools: ToolRegistry) -> None:
 def answer(brain, conversation: Conversation, tools: ToolRegistry, name: str, log: SessionLog) -> None:
     """Run one turn (tool rounds + streamed final answer), store it and log it."""
     out = TerminalOutput(name)
+
+    def on_tool_result(tool_name, args, result):
+        out.tool_result(tool_name, args, result)
+        # Logged at once: the action really happened, even if the turn fails or is interrupted later
+        log_tool_run(log, tools, tool_name, args, result)
+
     try:
         turn = run_turn(brain, conversation, tools, confirm=ask_confirmation,
-                        on_text=out.text, on_tool_call=out.tool_call, on_tool_result=out.tool_result)
+                        on_text=out.text, on_tool_call=out.tool_call, on_tool_result=on_tool_result)
         out.end_line()
     except KeyboardInterrupt:
         out.text(" [interrupted]")
@@ -141,7 +160,10 @@ def answer(brain, conversation: Conversation, tools: ToolRegistry, name: str, lo
     if turn.stats.get("done_reason") == "length":
         print("  [cut off: the answer reached max_tokens]")
     if turn.capped:
-        log.log("event", "tool round cap reached")
+        log.log("event", "tool round cap reached", rounds=turn.rounds)
+    if turn.declined:
+        log.log("event", "all actions declined",
+                tools=[run.name for run in turn.tool_runs if run.result.confirmed is False])
     extra = {"stats": turn.stats}
     if turn.text != turn.raw:
         extra["raw"] = turn.raw  # keep the original when the safety net had to step in
