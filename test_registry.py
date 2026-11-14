@@ -1,5 +1,5 @@
 """
-Unit tests for the tool registry (Phase 2, step 2).
+Unit tests for the tool registry (Phase 2, step 2; duration fix in step 5c.1).
 
 No LLM and no real Mac actions: only dummy tools. The `calls` list records
 every time a tool function really runs, so we can prove that a "confirm"
@@ -234,6 +234,48 @@ class TestRobustness(unittest.TestCase):
     def test_duration_recorded(self):
         r = self.reg.execute("set_volume", {"level": 5})
         self.assertGreaterEqual(r.duration_s, 0)
+
+
+class TestDuration(unittest.TestCase):
+    """duration_s = time the tool itself ran. Sir's y/N thinking time must NOT count."""
+
+    def setUp(self):
+        self.reg, self.calls, _ = make_registry()
+
+    @staticmethod
+    def slow_yes(tool, args):
+        time.sleep(0.3)   # sir thinks for 0.3 s, then says yes
+        return True
+
+    def test_confirmation_time_not_counted(self):
+        r = self.reg.execute("quit_app", {"app_name": "Notes"}, confirm=self.slow_yes)
+        self.assertTrue(r.success)
+        self.assertTrue(r.confirmed)
+        self.assertLess(r.duration_s, 0.1)   # quit_app is instant; the 0.3 s was sir's
+
+    def test_tool_time_counted_but_not_confirmation(self):
+        reg = ToolRegistry()
+
+        @reg.tool("Slow confirm tool.", risk="confirm")
+        def nap():
+            time.sleep(0.2)
+            return ToolResult(True, "rested")
+
+        r = reg.execute("nap", {}, confirm=self.slow_yes)
+        self.assertTrue(r.success)
+        self.assertGreaterEqual(r.duration_s, 0.19)   # the tool's own 0.2 s is measured...
+        self.assertLess(r.duration_s, 0.4)            # ...but not the 0.3 s before it
+
+    def test_never_ran_is_zero(self):
+        declined = self.reg.execute("quit_app", {"app_name": "Notes"}, confirm=lambda tool, args: False)
+        invalid = self.reg.execute("set_volume", {"level": "loud"})
+        unknown = self.reg.execute("rm_rf", {})
+        for r in (declined, invalid, unknown):
+            with self.subTest(message=r.message):
+                self.assertFalse(r.success)
+                self.assertEqual(r.duration_s, 0.0)
+        self.assertFalse(declined.confirmed)
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == "__main__":

@@ -35,7 +35,8 @@ class ToolResult:
     success: bool
     message: str
     confirmed: bool | None = None   # filled in by execute(): None = no confirmation needed
-    duration_s: float = 0.0         # filled in by execute()
+    duration_s: float = 0.0         # filled in by execute(): time the tool itself ran
+                                    # (0.0 if it never ran; sir's y/N time is NOT included)
 
 
 @dataclass
@@ -166,9 +167,7 @@ class ToolRegistry:
         confirm: function(tool, args) -> True/False, called for "confirm" tools.
                  No confirm function means the answer is NO.
         """
-        start = time.perf_counter()
         result = self._run(name, arguments, confirm)
-        result.duration_s = round(time.perf_counter() - start, 3)
         result.message = _truncate(result.message)
         return result
 
@@ -200,6 +199,7 @@ class ToolRegistry:
         return clean, None
 
     def _run(self, name, arguments, confirm) -> ToolResult:
+        """Validate, ask for confirmation if needed, then time ONLY the tool itself."""
         tool = self.get(name)
         if tool is None:
             return ToolResult(False, f"There is no tool called '{name}'.")
@@ -217,6 +217,15 @@ class ToolRegistry:
             if not confirmed:
                 return ToolResult(False, "Sir declined, so nothing was done.", confirmed=False)
 
+        # The clock starts only now: sir's y/N thinking time is not tool time.
+        start = time.perf_counter()
+        result = self._call(tool, args)
+        result.duration_s = round(time.perf_counter() - start, 3)
+        result.confirmed = confirmed
+        return result
+
+    def _call(self, tool: Tool, args: dict) -> ToolResult:
+        """Run the tool function in a thread with a timeout. Every problem becomes FAILED."""
         # Python cannot kill a stuck thread: after the timeout we stop WAITING, the thread
         # may finish in the background. Tools themselves use subprocess timeouts (step 4).
         pool = ThreadPoolExecutor(max_workers=1)
@@ -224,18 +233,15 @@ class ToolRegistry:
         try:
             result = future.result(timeout=tool.timeout_s)
         except TimeoutError:
-            return ToolResult(False, f"The tool did not finish within {tool.timeout_s:g} seconds.",
-                              confirmed=confirmed)
+            return ToolResult(False, f"The tool did not finish within {tool.timeout_s:g} seconds.")
         except Exception as e:
-            return ToolResult(False, f"The tool failed: {e}", confirmed=confirmed)
+            return ToolResult(False, f"The tool failed: {e}")
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 
         if not isinstance(result, ToolResult):
-            return ToolResult(False, "The tool returned something unexpected.", confirmed=confirmed)
-        result.confirmed = confirmed
+            return ToolResult(False, "The tool returned something unexpected.")
         return result
-
 
 # The registry Jarvis uses. Tool modules do:  from jarvis.tools.registry import tool, ToolResult
 registry = ToolRegistry()
