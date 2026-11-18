@@ -10,6 +10,12 @@ Once:     token overhead of the tool definitions, RAM of the loaded model.
 At the end the decision rule (agreed BEFORE the first run) gives a verdict.
 
 Touches the real system: no (no tool is ever executed).
+
+HISTORICAL: this is the Phase 2 step 1 benchmark, kept for the record
+(result: 51/51 tool choice, 27/27 arguments, 0 false calls -> the brain stays local).
+Its prompt patch expects the Phase 1 personality ("What you cannot do yet"),
+which no longer exists, so it does not run as-is anymore.
+The current behaviour test is test_tools.py.
 Usage:  python test_toolcalling.py
 """
 
