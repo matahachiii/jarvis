@@ -100,15 +100,20 @@ class OllamaBrain(Brain):
             stats=stats,
         )
 
-    def warm_up(self, messages: list[dict]) -> None:
+    def warm_up(self, messages: list[dict], tools: list | None = None) -> None:
         """
-        Load the model into RAM and pre-process the given messages (the system prompt),
+        Load the model into RAM and pre-process the given messages (system prompt + example turns),
         so Ollama's prompt cache already holds them when the first real question arrives.
+
+        Pass the SAME tools as the real requests: the tool definitions are part of the prompt,
+        so a warm-up without them leaves the cache useless (Phase 3 step 0: first answer
+        7.45 s instead of ~0.4 s).
         Uses the same num_ctx as chat_stream: a different value would make Ollama reload the model.
         """
         self.client.chat(
             model=self.model,
             messages=messages,
+            tools=tools,
             think=self.settings.get("think", False),
             keep_alive=self.keep_alive,
             options={

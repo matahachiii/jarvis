@@ -184,7 +184,7 @@ def main() -> None:
 
     print(f"Starting {name} ({brain.name}, {len(registry.names)} tools)...")
     try:
-        brain.warm_up(conversation.messages)
+        brain.warm_up(conversation.messages, tools=registry.schemas() or None)  # same tools as run_turn sends
     except ConnectionError:
         print(f"Can't reach the brain. {OLLAMA_HINT}")
         return
