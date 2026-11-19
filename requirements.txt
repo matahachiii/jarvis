@@ -8,3 +8,7 @@ numpy==2.4.6          # audio as arrays of numbers
 sounddevice==0.5.6    # microphone recording + playback (bundles PortAudio)
 soundfile==0.14.0     # read/write WAV files
 jiwer==4.0.0          # word error rate (WER) for the STT benchmark and tests
+
+# Phase 3: speech-to-text (step 1 benchmark: faster-whisper base.en chosen, Apple on-device as alternative)
+faster-whisper==1.2.1          # default STT (+ ctranslate2, onnxruntime, av, tokenizers, huggingface-hub)
+pyobjc-framework-Speech==13.0  # alternative STT: macOS on-device speech recognition (+ pyobjc-core, -Cocoa)
