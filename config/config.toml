@@ -53,3 +53,20 @@ api_key_env = "JARVIS_CLOUD_API_KEY"
 engine = "faster-whisper"
 model = "base.en"          # faster-whisper model size
 language = "en"
+[voice.tts]
+# Which text-to-speech engine to use (one line to switch):
+#   "kokoro" -> Kokoro v1.0 int8 (default: ear 5/5, +114 MB, ~0.2 s per second of speech)
+#   "piper"  -> Piper alan (plan B: ear 3/5, +171 MB, 0.14 s per sentence)
+# Kokoro condition (step 6): key release -> first audio <= 1.5 s median, else switch to "piper".
+engine = "kokoro"
+
+[voice.tts.kokoro]
+model = "data/models/kokoro/kokoro-v1.0.int8.onnx"   # relative to the project folder
+voices = "data/models/kokoro/voices-v1.0.bin"
+voice = "bm_george"        # other British male voices in the same file: bm_lewis, bm_daniel, bm_fable
+lang = "en-gb"
+speed = 1.0
+lean = true                # ONNX Runtime without memory arena: 366 -> 114 MB, a bit slower
+
+[voice.tts.piper]
+voice = "en_GB-alan-medium"
