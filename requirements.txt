@@ -12,3 +12,7 @@ jiwer==4.0.0          # word error rate (WER) for the STT benchmark and tests
 # Phase 3: speech-to-text (step 1 benchmark: faster-whisper base.en chosen, Apple on-device as alternative)
 faster-whisper==1.2.1          # default STT (+ ctranslate2, onnxruntime, av, tokenizers, huggingface-hub)
 pyobjc-framework-Speech==13.0  # alternative STT: macOS on-device speech recognition (+ pyobjc-core, -Cocoa)
+
+# Phase 3: text-to-speech (step 1 benchmark: Kokoro int8 with lean ONNX Runtime settings chosen)
+kokoro-onnx==0.6.1    # default TTS (+ espeakng-loader, phonemizer); model files in data/models/kokoro/ (not in git)
+piper-tts==1.8.0      # plan B (fast, GPL-3); remove after step 6 if Kokoro passes the end-to-end test
