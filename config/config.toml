@@ -41,3 +41,15 @@ base_url = ""
 model = ""
 # Name of the environment variable in .env that holds the API key
 api_key_env = "JARVIS_CLOUD_API_KEY"
+
+
+[voice]
+# Phase 3: voice. Engines chosen in the step 1 benchmark (bench_stt.py, bench_tts.py).
+
+[voice.stt]
+# Which speech-to-text engine to use:
+#   "faster-whisper" -> Whisper on the CPU (default: WER 4.6%, 0.30 s per phrase, +74 MB)
+#   "apple"          -> macOS on-device recognition (WER 1.5%, 0.11 s, +212 MB in a macOS service)
+engine = "faster-whisper"
+model = "base.en"          # faster-whisper model size
+language = "en"
