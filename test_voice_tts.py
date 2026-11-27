@@ -5,6 +5,7 @@ no Kokoro, no Piper, no sound.
     python -m unittest test_voice_tts
 """
 
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -18,17 +19,22 @@ from jarvis.voice.tts import PROJECT_DIR, TTS, KokoroTTS, _project_path, create_
 class FakeTTS(TTS):
     """Returns 0.1 s of a fixed signal per word, and remembers what it was asked to say."""
 
-    def __init__(self, settings: dict | None = None, shape: str = "flat"):
+    def __init__(self, settings: dict | None = None, shape: str = "flat", fail: bool = False):
         super().__init__(settings or {})
         self.calls = []
+        self.threads = []      # the thread every synthesis ran on
         self.shape = shape
+        self.fail = fail
 
     @property
     def sample_rate(self) -> int:
         return 1000
 
     def _synthesize(self, text: str) -> np.ndarray:
+        if self.fail:
+            raise ValueError("engine broke")
         self.calls.append(text)
+        self.threads.append(threading.get_ident())
         audio = np.full(100 * len(text.split()), 0.5, dtype=np.float64)   # float64 on purpose
         return audio.reshape(-1, 1) if self.shape == "column" else audio
 
@@ -64,6 +70,23 @@ class TestTTSInterface(unittest.TestCase):
         engine = FakeTTS()
         engine.warm_up()
         self.assertEqual(len(engine.calls), 1)
+
+    def test_every_synthesis_runs_on_one_engine_thread(self):
+        # step 3.4c: the first synthesis in a new thread is ~1.1 s slower, so always use the same one
+        engine = FakeTTS()
+        engine.warm_up()
+        engine.synthesize("From the main thread.")
+        for _ in range(2):
+            caller = threading.Thread(target=engine.synthesize, args=("From another thread.",))
+            caller.start()
+            caller.join()
+        self.assertEqual(len(engine.threads), 4)
+        self.assertEqual(len(set(engine.threads)), 1)
+        self.assertNotEqual(engine.threads[0], threading.get_ident())
+
+    def test_engine_error_reaches_the_caller(self):
+        with self.assertRaises(ValueError):
+            FakeTTS(fail=True).synthesize("Hello.")
 
 
 class TestCreateTTS(unittest.TestCase):

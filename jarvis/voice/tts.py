@@ -11,12 +11,18 @@ Kokoro was chosen with a recorded exception: step 6 must measure key release -> 
 
 synthesize() does NOT normalize: the Speaker runs normalize_for_speech() first, sentence by sentence.
 
+Every synthesis runs on ONE thread that lives as long as the engine, whoever calls synthesize().
+Measured in step 3.4c: the first synthesis in a NEW thread costs ~1.1 s extra (1.37 s instead of
+0.28 s for "Certainly, sir."), so a fresh thread per answer made every answer slow. warm_up()
+warms this one thread at start-up.
+
 Checkpoint (speaks out loud):  python -m jarvis.voice.tts
                                python -m jarvis.voice.tts "It's 12°C at 3 pm." --engine piper
 """
 
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +46,7 @@ class TTS(ABC):
 
     def __init__(self, settings: dict):
         self.settings = settings
+        self._thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts")   # see the docstring
 
     @property
     def name(self) -> str:
@@ -52,11 +59,15 @@ class TTS(ABC):
         """Samples per second of this engine's audio (known before the first synthesis)."""
 
     def synthesize(self, text: str) -> TTSResult:
-        """Turn text into audio, with timing. Empty or blank text gives empty audio (the engine is not called)."""
+        """
+        Turn text into audio, with timing. Empty or blank text gives empty audio (the engine is not called).
+        Runs on the engine's own thread and waits for the result; engine errors reach the caller.
+        """
         text = text.strip()
         start = time.perf_counter()
         if text:
-            audio = np.asarray(self._synthesize(text), dtype=np.float32).reshape(-1)
+            audio = self._thread.submit(self._synthesize, text).result()
+            audio = np.asarray(audio, dtype=np.float32).reshape(-1)
         else:
             audio = np.zeros(0, dtype=np.float32)
         return TTSResult(
@@ -66,7 +77,7 @@ class TTS(ABC):
         )
 
     def warm_up(self) -> None:
-        """One short synthesis at start-up, so the first real one is fast (like brain.warm_up)."""
+        """One short synthesis at start-up (on the engine's thread), so the first real one is fast."""
         self.synthesize("Hello, sir.")
 
     @abstractmethod
